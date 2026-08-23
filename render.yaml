@@ -1,0 +1,84 @@
+# Render Blueprint - infrastructure as code.
+#
+# Deploy: Render dashboard -> New -> Blueprint -> pick this repo.
+# Render reads this file and creates every service at once. Push to `main`
+# afterwards and it redeploys automatically.
+#
+# Only the API is defined so far. The three portals get added here as
+# `runtime: static` services once they exist - a blueprint that references
+# directories which aren't in the repo yet will fail to apply.
+
+services:
+  - type: web
+    name: inspectorone-api
+    runtime: node
+    plan: free # -> starter ($7/mo) before real inspectors use this.
+    # Free web services sleep after 15 min and take 30-60s to wake. Static
+    # sites don't, so only this service is affected - but it's the first
+    # request of every morning that pays the cost.
+    region: oregon
+    branch: main
+    autoDeploy: true
+
+    # Builds @inspectorone/shared first, then the API - see the root build script.
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start -w @inspectorone/api
+    healthCheckPath: /healthz
+
+    # Migrations run at boot (apps/api/src/index.ts), so no preDeploy step is
+    # needed. Move them to `preDeployCommand` if you ever scale past one
+    # instance, so concurrent boots can't race each other.
+
+    # Only rebuild when something this service depends on actually changed.
+    # Without this, editing a portal redeploys the API too.
+    buildFilter:
+      paths:
+        - apps/api/**
+        - packages/shared/**
+        - package.json
+        - package-lock.json
+        - render.yaml
+
+    envVars:
+      - fromGroup: inspectorone-shared
+
+      # `sync: false` makes Render prompt for the value and keeps it out of git.
+      - key: DATABASE_URL
+        sync: false # Neon or Supabase pooled connection string.
+      - key: SIGNING_SECRET
+        sync: false # `openssl rand -hex 32`
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+
+      - key: NODE_ENV
+        value: production
+      - key: STORAGE_DRIVER
+        value: s3
+      - key: R2_BUCKET
+        value: inspectorone-media
+      # The console email driver prints invite links to the log, and env.ts
+      # refuses to boot it under NODE_ENV=production for exactly that reason.
+      - key: EMAIL_DRIVER
+        value: resend
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false # e.g. InspectorOne <noreply@yourdomain.com>
+      # Invite links are built from PUBLIC_APP_URL. Point it at the real portal
+      # or people will be sent to localhost to accept their invitation.
+      - key: PUBLIC_APP_URL
+        sync: false
+      - key: PUBLIC_API_URL
+        sync: false
+
+envVarGroups:
+  - name: inspectorone-shared
+    envVars:
+      - key: LOG_LEVEL
+        value: info
+      - key: S3_REGION
+        value: auto

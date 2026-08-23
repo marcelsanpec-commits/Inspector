@@ -1,0 +1,121 @@
+import { randomBytes } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import dotenv from 'dotenv';
+import { z } from 'zod';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+export const REPO_ROOT = path.resolve(here, '../../..');
+
+// .env.local wins over .env; neither is required for local development.
+for (const file of ['.env.local', '.env']) {
+  const full = path.join(REPO_ROOT, file);
+  if (existsSync(full)) dotenv.config({ path: full });
+}
+
+const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  PORT: z.coerce.number().int().positive().default(3000),
+  LOG_LEVEL: z.string().default('info'),
+
+  /** Empty locally: the API then runs PGlite, persisted to ./.data/pglite. */
+  DATABASE_URL: z.string().optional(),
+  PGLITE_DIR: z.string().default(path.join(REPO_ROOT, '.data', 'pglite')),
+
+  STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
+  LOCAL_STORAGE_DIR: z.string().default(path.join(REPO_ROOT, 'storage')),
+
+  R2_ACCOUNT_ID: z.string().optional(),
+  R2_ACCESS_KEY_ID: z.string().optional(),
+  R2_SECRET_ACCESS_KEY: z.string().optional(),
+  R2_BUCKET: z.string().default('inspectorone-media'),
+  S3_ENDPOINT: z.string().optional(),
+  S3_REGION: z.string().default('auto'),
+
+  /** Signs storage upload/download tokens. Required in production. */
+  SIGNING_SECRET: z.string().optional(),
+
+  SESSION_TTL_DAYS: z.coerce.number().int().min(1).max(365).default(30),
+  INVITE_TTL_DAYS: z.coerce.number().int().min(1).max(90).default(14),
+
+  PUBLIC_API_URL: z.string().default('http://localhost:3000'),
+  /** Where invite links point. */
+  PUBLIC_APP_URL: z.string().default('http://localhost:5173'),
+
+  CORS_ORIGINS: z
+    .string()
+    .default('http://localhost:5173,http://localhost:5174,http://localhost:5175'),
+
+  /**
+   * With no email provider configured, invite links are logged to the server
+   * console and returned in the API response so the whole flow works offline.
+   * Refused in production, where a link sitting in a log is a live credential.
+   */
+  EMAIL_DRIVER: z.enum(['console', 'resend']).default('console'),
+  RESEND_API_KEY: z.string().optional(),
+  EMAIL_FROM: z.string().default('InspectorOne <noreply@example.com>'),
+});
+
+const parsed = envSchema.safeParse(process.env);
+if (!parsed.success) {
+  console.error('Invalid environment configuration:');
+  console.error(parsed.error.flatten().fieldErrors);
+  process.exit(1);
+}
+
+const raw = parsed.data;
+const isProd = raw.NODE_ENV === 'production';
+
+if (isProd && !raw.DATABASE_URL) {
+  console.error(
+    'FATAL: DATABASE_URL is required in production. PGlite is a local-development ' +
+      'database and its contents do not survive a Render deploy.',
+  );
+  process.exit(1);
+}
+
+if (isProd && !raw.SIGNING_SECRET) {
+  console.error('FATAL: SIGNING_SECRET is required in production.');
+  process.exit(1);
+}
+
+if (isProd && raw.EMAIL_DRIVER === 'console') {
+  console.error(
+    'FATAL: EMAIL_DRIVER=console prints invite links to the server log, where ' +
+      'anyone with log access could redeem them. Configure a real provider.',
+  );
+  process.exit(1);
+}
+
+if (raw.STORAGE_DRIVER === 's3') {
+  const missing = (['R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY'] as const).filter(
+    (k) => !raw[k],
+  );
+  if (!raw.S3_ENDPOINT && !raw.R2_ACCOUNT_ID) {
+    missing.push('R2_ACCOUNT_ID' as never);
+  }
+  if (missing.length) {
+    console.error(`FATAL: STORAGE_DRIVER=s3 but missing: ${missing.join(', ')}`);
+    process.exit(1);
+  }
+}
+
+export const env = {
+  ...raw,
+  isProd,
+  isDev: raw.NODE_ENV === 'development',
+  isTest: raw.NODE_ENV === 'test',
+  // Ephemeral in development so nobody has to invent one; required in prod.
+  SIGNING_SECRET: raw.SIGNING_SECRET ?? randomBytes(32).toString('hex'),
+  corsOrigins: raw.CORS_ORIGINS.split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
+  s3Endpoint:
+    raw.S3_ENDPOINT ??
+    (raw.R2_ACCOUNT_ID
+      ? `https://${raw.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`
+      : undefined),
+};
+
+export type Env = typeof env;

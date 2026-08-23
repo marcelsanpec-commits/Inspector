@@ -1,0 +1,25 @@
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+
+# Secrets - never commit these
+.env
+.env.local
+.env.*.local
+
+# Local dev database (PGlite data directory)
+.data/
+
+# Local storage driver output (inspection photos during dev)
+storage/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json

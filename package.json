@@ -1,0 +1,19 @@
+{
+  "name": "inspectorone",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "workspaces": ["packages/*", "apps/*"],
+  "scripts": {
+    "postinstall": "npm run build:shared",
+    "build:shared": "npm run build -w @inspectorone/shared",
+    "dev": "npm run build:shared && npm run dev -w @inspectorone/api",
+    "build": "npm run build -w @inspectorone/shared && npm run build -w @inspectorone/api",
+    "db:generate": "npm run db:generate -w @inspectorone/api",
+    "db:migrate": "npm run db:migrate -w @inspectorone/api",
+    "db:reset": "npm run db:reset -w @inspectorone/api",
+    "seed": "npm run seed -w @inspectorone/api",
+    "test": "npm run build:shared && npm run test -w @inspectorone/api",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  }
+}
