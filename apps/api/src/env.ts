@@ -80,12 +80,36 @@ if (isProd && !raw.SIGNING_SECRET) {
   process.exit(1);
 }
 
+/**
+ * The console email driver prints invite links to the log, where anyone with
+ * log access could redeem them. That is a real hazard, but refusing to BOOT
+ * over it blocks a first deploy for no good reason - you can sign up directly
+ * and never touch an invite.
+ *
+ * So the server starts and warns loudly, and `sendInviteEmail` refuses at the
+ * point where a link would actually be written to a log. The safety property
+ * is preserved; the deploy is not held hostage to it.
+ */
 if (isProd && raw.EMAIL_DRIVER === 'console') {
-  console.error(
-    'FATAL: EMAIL_DRIVER=console prints invite links to the server log, where ' +
-      'anyone with log access could redeem them. Configure a real provider.',
+  console.warn(
+    '\nWARNING: EMAIL_DRIVER=console in production. The server will start, but ' +
+      'sending invitations is disabled - an invite link printed to a log is a ' +
+      'live credential. Set EMAIL_DRIVER=resend and RESEND_API_KEY to enable ' +
+      'invites.\n',
   );
-  process.exit(1);
+}
+
+/**
+ * Local storage in production writes photos to the instance filesystem, which
+ * Render replaces on every deploy. Inspection photos are the one thing in this
+ * system that cannot be regenerated, so losing them silently is unacceptable.
+ */
+if (isProd && raw.STORAGE_DRIVER === 'local') {
+  console.warn(
+    '\nWARNING: STORAGE_DRIVER=local in production. Uploaded photos are written ' +
+      'to this instance and WILL BE PERMANENTLY LOST on the next deploy or ' +
+      'restart. Fine for a first look; configure R2 before real inspections.\n',
+  );
 }
 
 if (raw.STORAGE_DRIVER === 's3') {
