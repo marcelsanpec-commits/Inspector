@@ -21,7 +21,7 @@ services:
     autoDeploy: true
 
     # Builds @inspectorone/shared first, then the API - see the root build script.
-    buildCommand: npm ci && npm run build
+    buildCommand: npm ci --include=dev && npm run build
     startCommand: npm run start -w @inspectorone/api
     healthCheckPath: /healthz
 

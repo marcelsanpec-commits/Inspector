@@ -7,12 +7,15 @@ build/
 .env
 .env.local
 .env.*.local
+# NOTE: the leading slash matters. A bare "storage/" would match a directory of
+# that name at ANY depth - which silently excluded apps/api/src/storage/ from
+# the repo and broke the first Render build.
 
 # Local dev database (PGlite data directory)
-.data/
+/.data/
 
 # Local storage driver output (inspection photos during dev)
-storage/
+/storage/
 
 # Logs
 *.log
