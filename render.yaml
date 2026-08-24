@@ -74,6 +74,48 @@ services:
         sync: false
       - key: PUBLIC_API_URL
         sync: false
+      # Browsers block cross-origin API calls unless the server names the
+      # caller. Set this to the web service's URL below, comma-separated if you
+      # add a custom domain later.
+      - key: CORS_ORIGINS
+        sync: false
+
+  # The app itself. A static site, so unlike the API it never sleeps - which
+  # matters, because it is the first thing an inspector loads in the morning.
+  - type: web
+    name: inspectorone-web
+    runtime: static
+    branch: main
+    autoDeploy: true
+    buildCommand: npm ci --include=dev && npm run build:shared && npm run build -w @inspectorone/web
+    staticPublishPath: apps/web/dist
+    buildFilter:
+      paths:
+        - apps/web/**
+        - packages/shared/**
+        - package.json
+        - package-lock.json
+        - render.yaml
+    routes:
+      # Client-side routing: every path must serve index.html, or a refresh on
+      # /jobs/123 returns a 404 from the CDN instead of the app.
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+    envVars:
+      # Baked in at build time by Vite, so a change here needs a rebuild.
+      - key: VITE_API_URL
+        sync: false
 
 envVarGroups:
   - name: inspectorone-shared
