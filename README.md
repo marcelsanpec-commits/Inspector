@@ -10,8 +10,14 @@ No accounts, no API keys, no Docker.
 ```bash
 npm install          # also builds @inspectorone/shared
 npm run seed         # migrate + load demo data
-npm run dev          # API on http://localhost:3000
+npm run dev          # API on :3000, app on :5173
 ```
+
+Open **http://localhost:5173** and sign in.
+
+To try the camera and dictation properly you need a real phone: `npm run dev`
+binds to your network, so open `http://<your-computer's-IP>:5173` on the handset
+while it's on the same wifi. A desktop browser cannot honestly test either one.
 
 `npm test` runs 57 tests. `npm run db:reset` wipes local data; follow with `npm run seed`.
 
@@ -131,11 +137,16 @@ Compress images client-side. Phone photos are ~4MB; at 1600px JPEG q80 they're
 
 ## Status
 
-**Done:** schema (14 tables), signup/login/sessions, invites both ways, roster
-management for companies and clients, sites, persistent objects, jobs with
-multi-inspector assignment and restrictable client access, photo upload
-handshake, voice notes, report-inclusion toggle, gallery with filters, 57 tests.
+**Done — back end:** schema (14 tables), signup/login/sessions, invites both
+ways, roster management for companies and clients, sites, persistent objects,
+jobs with multi-inspector assignment and restrictable client access, photo
+upload handshake, voice notes, report-inclusion toggle, gallery with filters.
+57 tests.
 
-**Next:** the three portals (login → role-aware shell, inspector capture screen
-with camera + dictation, company job management, client gallery), then the
-report template and PDF generation, then the offline queue.
+**Done — app:** one React app with role-aware navigation. Login and a
+three-way signup; inspector capture (camera, New Object by serial, on-device
+dictation, include-in-report); company job creation, team roster, clients,
+sites; client-facing job list and gallery; per-object inspection history.
+
+**Next:** the report template and PDF generation, then the offline capture
+queue, then Cloudflare R2 so photos survive a redeploy.
