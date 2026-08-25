@@ -125,8 +125,24 @@ if (raw.STORAGE_DRIVER === 's3') {
   }
 }
 
+/**
+ * The test suite wipes and reseeds its database on every run. A `.env.local`
+ * holding a production connection string is loaded by dotenv like any other,
+ * which would silently point that wipe at the live database - so under
+ * NODE_ENV=test the value is ignored outright and PGlite is used instead.
+ *
+ * This is not paranoia: it happened. The seed guard caught it, but relying on a
+ * second line of defence for something this destructive is not good enough.
+ * Set ALLOW_TEST_DATABASE_URL=1 if you ever deliberately want otherwise.
+ */
+const testIsolatedDatabaseUrl =
+  raw.NODE_ENV === 'test' && !process.env.ALLOW_TEST_DATABASE_URL
+    ? undefined
+    : raw.DATABASE_URL;
+
 export const env = {
   ...raw,
+  DATABASE_URL: testIsolatedDatabaseUrl,
   isProd,
   isDev: raw.NODE_ENV === 'development',
   isTest: raw.NODE_ENV === 'test',

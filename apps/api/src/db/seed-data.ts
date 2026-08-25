@@ -200,7 +200,24 @@ export async function seed({ quiet = false, force = false } = {}) {
     { jobId: SEED.job4, objectId: SEED.objAhu, position: 0 },
   ]);
 
-  const photoSpecs = [
+  /**
+   * Photo bytes go through whatever storage adapter is configured locally,
+   * which is this machine's disk. A remote API cannot read that, so seeding a
+   * remote database would produce rows pointing at files it will never find -
+   * a gallery of broken images.
+   *
+   * So skip them here. Photos for a remote database have to arrive the way real
+   * ones do: uploaded through the API, into the storage that API is using.
+   */
+  const skipPhotos = !!env.DATABASE_URL;
+  if (skipPhotos && !quiet) {
+    console.log(
+      '\nSkipping demo photos: the database is remote but storage is local, so ' +
+        'the API could not serve them. Upload photos through the app instead.',
+    );
+  }
+
+  const photoSpecs = skipPhotos ? [] : [
     { jobId: SEED.job1, objectId: SEED.objElevator, caption: 'Machine room overview', voiceNote: 'Governor rope shows light surface corrosion, no measurable loss of section.', include: true },
     { jobId: SEED.job1, objectId: SEED.objElevator, caption: 'Governor rope close-up', voiceNote: null, include: false },
     { jobId: SEED.job1, objectId: SEED.objAhu, caption: 'AHU-3 condensate pan', voiceNote: 'Standing water in the pan, drain appears partially blocked.', include: true },
