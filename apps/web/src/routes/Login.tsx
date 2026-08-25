@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { ErrorNotice } from '../components/ui.js';
+import { ErrorNotice, PasswordInput } from '../components/ui.js';
 import { useAuth } from '../lib/auth.js';
 
 export default function Login() {
@@ -55,17 +55,15 @@ export default function Login() {
             />
           </label>
 
-          <label className="field">
+          <div className="field">
             <span className="label">Password</span>
-            <input
-              className="input"
-              type="password"
+            <PasswordInput
+              value={password}
+              onChange={setPassword}
               autoComplete="current-password"
               required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
             />
-          </label>
+          </div>
 
           <button className="btn btn-primary btn-lg btn-block" disabled={busy}>
             {busy && <span className="spin" />}

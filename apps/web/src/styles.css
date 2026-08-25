@@ -436,6 +436,39 @@ a.row:hover {
   color: var(--text-3);
 }
 
+/* Input with a trailing button, e.g. the password reveal toggle. */
+.input-affix {
+  position: relative;
+  display: flex;
+}
+.input-affix .input {
+  padding-right: 72px;
+}
+.affix-btn {
+  position: absolute;
+  right: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 560;
+  padding: 8px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+  min-height: 34px;
+}
+.affix-btn:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.affix-btn[aria-pressed='true'] {
+  color: var(--accent);
+}
+
 .check {
   display: flex;
   align-items: flex-start;

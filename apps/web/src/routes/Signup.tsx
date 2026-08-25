@@ -1,7 +1,7 @@
 import type { SignupRole } from '@inspectorone/shared';
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ErrorNotice } from '../components/ui.js';
+import { ErrorNotice, PasswordInput } from '../components/ui.js';
 import { useAuth } from '../lib/auth.js';
 
 const ROLES: {
@@ -145,21 +145,19 @@ export default function Signup() {
                 />
               </label>
 
-              <label className="field">
+              <div className="field">
                 <span className="label">Password</span>
-                <input
-                  className="input"
-                  type="password"
-                  required
-                  minLength={10}
-                  autoComplete="new-password"
+                <PasswordInput
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={setPassword}
+                  autoComplete="new-password"
+                  minLength={10}
+                  required
                 />
                 <span className="hint">
                   At least 10 characters. Length matters more than symbols.
                 </span>
-              </label>
+              </div>
 
               <button className="btn btn-primary btn-lg btn-block" disabled={busy}>
                 {busy && <span className="spin" />}

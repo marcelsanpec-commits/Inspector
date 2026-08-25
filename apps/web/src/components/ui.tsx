@@ -1,5 +1,69 @@
-import type { ReactNode } from 'react';
+import { useId, useState, type ReactNode } from 'react';
 import { ApiError } from '../lib/api.js';
+
+/**
+ * Password field with a reveal toggle.
+ *
+ * Typing a long password blind on a phone keyboard, outdoors, in gloves, is how
+ * people end up choosing short ones. Being able to check what you typed is a
+ * security feature, not a hole in one - the risk is someone reading over your
+ * shoulder, which the person holding the phone is best placed to judge.
+ */
+export function PasswordInput({
+  value,
+  onChange,
+  autoComplete = 'current-password',
+  minLength,
+  required,
+  autoFocus,
+  placeholder,
+}: {
+  value: string;
+  onChange(v: string): void;
+  autoComplete?: string;
+  minLength?: number;
+  required?: boolean;
+  autoFocus?: boolean;
+  placeholder?: string;
+}) {
+  const [visible, setVisible] = useState(false);
+  const id = useId();
+
+  return (
+    <div className="input-affix">
+      <input
+        id={id}
+        className="input"
+        // Toggling the type keeps the browser's password manager working,
+        // which a custom masked field would break.
+        type={visible ? 'text' : 'password'}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        autoComplete={autoComplete}
+        minLength={minLength}
+        required={required}
+        autoFocus={autoFocus}
+        placeholder={placeholder}
+        // A revealed password should never be autocorrected or capitalised.
+        autoCapitalize="off"
+        autoCorrect="off"
+        spellCheck={false}
+      />
+      <button
+        type="button"
+        className="affix-btn"
+        onClick={() => setVisible((v) => !v)}
+        aria-pressed={visible}
+        aria-controls={id}
+        aria-label={visible ? 'Hide password' : 'Show password'}
+        // Keep the field focused so toggling doesn't interrupt typing.
+        onMouseDown={(e) => e.preventDefault()}
+      >
+        {visible ? 'Hide' : 'Show'}
+      </button>
+    </div>
+  );
+}
 
 export function StatusBadge({ status }: { status: string }) {
   const label = status.replace(/_/g, ' ');

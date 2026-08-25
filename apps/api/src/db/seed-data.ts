@@ -1,5 +1,7 @@
+import { count } from 'drizzle-orm';
 import { getDb } from './client.js';
 import { runMigrations } from './migrate.js';
+import { env } from '../env.js';
 import { hashPassword } from '../lib/password.js';
 import { getStorage, photoKey } from '../storage/index.js';
 import {
@@ -61,10 +63,26 @@ const TINY_JPEG = Buffer.from(
   'base64',
 );
 
-export async function seed({ quiet = false } = {}) {
+export async function seed({ quiet = false, force = false } = {}) {
   await runMigrations();
   const { db } = await getDb();
   const storage = await getStorage();
+
+  /**
+   * Seeding deletes everything first, which is fine for a local scratch
+   * database and catastrophic for a real one. Against a configured Postgres
+   * that already holds accounts, refuse unless the caller was explicit.
+   */
+  if (env.DATABASE_URL && !force) {
+    const [existing] = await db.select({ n: count() }).from(users);
+    if ((existing?.n ?? 0) > 0) {
+      throw new Error(
+        `Refusing to seed: DATABASE_URL points at a real database that already ` +
+          `holds ${existing?.n} account(s), and seeding deletes every row first. ` +
+          `Re-run with --force if you genuinely mean to erase it.`,
+      );
+    }
+  }
 
   // Clear in FK-safe order so re-seeding is repeatable.
   await db.delete(reports);

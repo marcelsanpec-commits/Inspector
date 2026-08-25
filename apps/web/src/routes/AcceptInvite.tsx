@@ -1,7 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { ErrorNotice, Loading, roleLabel } from '../components/ui.js';
+import {
+  ErrorNotice,
+  Loading,
+  PasswordInput,
+  roleLabel,
+} from '../components/ui.js';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/auth.js';
 
@@ -140,19 +145,17 @@ export default function AcceptInvite() {
                       onChange={(e) => setName(e.target.value)}
                     />
                   </label>
-                  <label className="field">
+                  <div className="field">
                     <span className="label">Choose a password</span>
-                    <input
-                      className="input"
-                      type="password"
-                      required
-                      minLength={10}
-                      autoComplete="new-password"
+                    <PasswordInput
                       value={password}
-                      onChange={(e) => setPassword(e.target.value)}
+                      onChange={setPassword}
+                      autoComplete="new-password"
+                      minLength={10}
+                      required
                     />
                     <span className="hint">At least 10 characters.</span>
-                  </label>
+                  </div>
                 </>
               )}
 
