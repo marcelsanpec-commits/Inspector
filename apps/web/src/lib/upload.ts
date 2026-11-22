@@ -1,5 +1,5 @@
 import { api } from './api.js';
-import type { ProcessedPhoto } from './image.js';
+import type { ReportPhoto } from './image.js';
 
 interface UploadTicket {
   photoId: string;
@@ -12,13 +12,17 @@ interface UploadTicket {
 export interface UploadInput {
   jobId: string;
   objectId?: string | null;
-  photo: ProcessedPhoto;
+  photo: ReportPhoto;
   caption?: string;
   voiceNote?: string;
   voiceNoteIsDictated?: boolean;
   includeInReport: boolean;
+  /** A finding - the API refuses one that is not also in the report. */
+  nonConforming?: boolean;
+  /** The structure's ID plate; replaces any previous plate photo. */
+  serialPlate?: boolean;
   /**
-   * Stable across retries. Generated once when the photo is queued, so a
+   * Stable across retries. Generated once when the photo is taken, so a
    * dropped signal mid-upload cannot produce two copies of the same shot.
    */
   clientRef: string;
@@ -52,6 +56,8 @@ export async function uploadPhoto(input: UploadInput): Promise<string> {
       voiceNote: input.voiceNote || undefined,
       voiceNoteIsDictated: input.voiceNoteIsDictated ?? false,
       includeInReport: input.includeInReport,
+      nonConforming: input.nonConforming ?? false,
+      serialPlate: input.serialPlate ?? false,
       clientRef: input.clientRef,
     },
   });
@@ -59,15 +65,24 @@ export async function uploadPhoto(input: UploadInput): Promise<string> {
   // A retry of something that already completed - nothing left to do.
   if (ticket.alreadyUploaded || !ticket.uploadUrl) return ticket.photoId;
 
-  const put = await fetch(ticket.uploadUrl, {
-    method: 'PUT',
-    headers: ticket.headers ?? { 'content-type': 'image/jpeg' },
-    body: input.photo.blob,
-  });
+  let put: Response;
+  try {
+    put = await fetch(ticket.uploadUrl, {
+      method: 'PUT',
+      headers: ticket.headers ?? { 'content-type': 'image/jpeg' },
+      body: input.photo.blob,
+    });
+  } catch {
+    // fetch only throws when the request never completed: no signal, or
+    // storage refusing the browser outright (a CORS problem with R2).
+    throw new Error(
+      "Couldn't reach photo storage. Check your signal and tap Save again - the photo stays here until it uploads.",
+    );
+  }
 
   if (!put.ok) {
     throw new Error(
-      `Upload failed (${put.status}). Your photo is still queued - try again when you have signal.`,
+      `Upload failed (${put.status}). The photo stays here - tap Save to try again.`,
     );
   }
 
@@ -77,8 +92,4 @@ export async function uploadPhoto(input: UploadInput): Promise<string> {
   });
 
   return ticket.photoId;
-}
-
-export function newClientRef(): string {
-  return crypto.randomUUID();
 }

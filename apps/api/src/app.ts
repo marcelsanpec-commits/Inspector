@@ -10,6 +10,25 @@ import { orgRoutes } from './routes/orgs.js';
 import { photoRoutes } from './routes/photos.js';
 import { siteRoutes } from './routes/sites.js';
 import { storageRoutes } from './routes/storage.js';
+import { structureRoutes } from './routes/structures.js';
+
+/**
+ * A validation failure from ANY copy of zod, not only the one imported here.
+ *
+ * On Windows the same zod can be loaded twice: as file:///c:/... when the
+ * working directory has a lowercase drive letter (VS Code's terminal does), and
+ * as file:///C:/... through @inspectorone/shared, whose symlink resolves to the
+ * capital. The schemas live in shared, so their errors failed `instanceof`
+ * here and every bad request came back as a 500 - but only in some terminals.
+ */
+function isZodError(err: unknown): err is ZodError {
+  return (
+    err instanceof ZodError ||
+    (err instanceof Error &&
+      err.name === 'ZodError' &&
+      Array.isArray((err as { issues?: unknown }).issues))
+  );
+}
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -73,7 +92,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       });
     }
 
-    if (err instanceof ZodError) {
+    if (isZodError(err)) {
       return reply.code(400).send({
         error: {
           code: 'validation_failed',
@@ -109,6 +128,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(siteRoutes);
   await app.register(jobRoutes);
   await app.register(photoRoutes);
+  await app.register(structureRoutes);
   if (env.STORAGE_DRIVER === 'local') {
     await app.register(storageRoutes);
   }

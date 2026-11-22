@@ -19,6 +19,7 @@ import type { StorageAdapter } from './index.js';
  * presigned R2 URL require CORS to be configured on the bucket in the
  * Cloudflare dashboard (allow PUT/GET from your portal origins, and expose
  * ETag). Without it uploads fail with an opaque network error.
+ * `npm run storage:check` tests exactly that, before a phone ever does.
  */
 export function createS3Storage(): StorageAdapter {
   const client = new S3Client({
@@ -29,6 +30,15 @@ export function createS3Storage(): StorageAdapter {
       secretAccessKey: env.R2_SECRET_ACCESS_KEY!,
     },
     forcePathStyle: true,
+    /**
+     * Without these, the SDK (3.729 and later) writes a CRC32 checksum into
+     * every presigned upload URL - computed over an EMPTY body, because at
+     * signing time there is no body. The phone then PUTs the real photo, the
+     * checksum cannot match, and every upload is rejected. Checksums only when
+     * an operation genuinely requires one keeps presigned URLs body-agnostic.
+     */
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    responseChecksumValidation: 'WHEN_REQUIRED',
   });
   const Bucket = env.R2_BUCKET;
 

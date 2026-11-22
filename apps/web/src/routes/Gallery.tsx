@@ -16,6 +16,8 @@ interface GalleryPhoto {
   caption: string | null;
   voiceNote: string | null;
   includeInReport: boolean;
+  nonConforming: boolean;
+  isSerialPlate: boolean;
   takenAt: string | null;
   gpsLat: number | null;
   gpsLng: number | null;
@@ -66,7 +68,8 @@ export default function Gallery() {
     onSuccess: (_data, photo) => {
       setOpen((p) => (p ? { ...p, includeInReport: !p.includeInReport } : p));
       qc.invalidateQueries({ queryKey: ['gallery'] });
-      qc.invalidateQueries({ queryKey: ['job-photos', photo.jobId] });
+      qc.invalidateQueries({ queryKey: ['structures', photo.jobId] });
+      qc.invalidateQueries({ queryKey: ['structure', photo.jobId] });
     },
   });
 
@@ -112,12 +115,24 @@ export default function Gallery() {
             <span className="label">In report</span>
             <select
               className="select"
-              value={params.get('includeInReport') ?? ''}
-              onChange={(e) => setFilter('includeInReport', e.target.value)}
+              value={
+                params.get('nonConforming') === 'true'
+                  ? 'nc'
+                  : (params.get('includeInReport') ?? '')
+              }
+              onChange={(e) => {
+                const next = new URLSearchParams(params);
+                next.delete('includeInReport');
+                next.delete('nonConforming');
+                if (e.target.value === 'nc') next.set('nonConforming', 'true');
+                else if (e.target.value) next.set('includeInReport', e.target.value);
+                setParams(next, { replace: true });
+              }}
             >
               <option value="">All photos</option>
               <option value="true">Included only</option>
               <option value="false">Excluded only</option>
+              <option value="nc">Non-conforming only</option>
             </select>
           </label>
 
@@ -174,6 +189,9 @@ export default function Gallery() {
                         {p.objectSerial && (
                           <span className="photo-flag mono">{p.objectSerial}</span>
                         )}
+                        {p.nonConforming && (
+                          <span className="photo-flag nc">non-conforming</span>
+                        )}
                         {!p.includeInReport && (
                           <span className="photo-flag excluded">not in report</span>
                         )}
@@ -217,7 +235,7 @@ export default function Gallery() {
               <span>{open.siteName}</span>
             </div>
             <div className="between">
-              <span className="muted">Object</span>
+              <span className="muted">Structure</span>
               {open.objectId ? (
                 <Link to={`/objects/${open.objectId}`} className="mono">
                   {open.objectSerial}
@@ -248,21 +266,36 @@ export default function Gallery() {
                 {open.includeInReport ? 'included' : 'excluded'}
               </span>
             </div>
+            {open.nonConforming && (
+              <div className="between">
+                <span className="muted">Finding</span>
+                <span className="badge badge-nc">non-conforming</span>
+              </div>
+            )}
           </div>
 
           <ErrorNotice error={toggleInclude.error} />
-          <button
-            className="btn btn-block mt"
-            disabled={toggleInclude.isPending}
-            onClick={() => toggleInclude.mutate(open)}
-          >
-            {toggleInclude.isPending && <span className="spin" />}
-            {open.includeInReport ? 'Exclude from report' : 'Include in report'}
-          </button>
-          <p className="hint">
-            Only people who can edit this job can change that. Clients see this
-            control fail, which is intended.
-          </p>
+          {open.nonConforming ? (
+            <p className="hint mt">
+              Non-conforming photos are always in the report. Clear the flag on the
+              structure's screen first if it was set by mistake.
+            </p>
+          ) : (
+            <>
+              <button
+                className="btn btn-block mt"
+                disabled={toggleInclude.isPending}
+                onClick={() => toggleInclude.mutate(open)}
+              >
+                {toggleInclude.isPending && <span className="spin" />}
+                {open.includeInReport ? 'Exclude from report' : 'Include in report'}
+              </button>
+              <p className="hint">
+                Only people who can edit this job can change that. Clients see this
+                control fail, which is intended.
+              </p>
+            </>
+          )}
         </Modal>
       )}
     </>

@@ -1,6 +1,7 @@
-import { relations } from 'drizzle-orm';
+import { relations, sql } from 'drizzle-orm';
 import {
   boolean,
+  check,
   doublePrecision,
   index,
   integer,
@@ -335,7 +336,12 @@ export const jobClientViewers = pgTable(
   ],
 );
 
-/** Which persistent objects were actually worked during a given job. */
+/**
+ * Which persistent objects were actually worked during a given job - in the
+ * inspection screens, a "structure". The object carries what is permanent
+ * about the thing (its serial, what it is); this row carries what belongs to
+ * this one inspection of it (the inspector's comments, whether they are done).
+ */
 export const jobObjects = pgTable(
   'job_objects',
   {
@@ -347,7 +353,18 @@ export const jobObjects = pgTable(
       .notNull()
       .references(() => objects.id, { onDelete: 'cascade' }),
     position: integer('position').notNull().default(0),
+    /**
+     * The inspector's comments on this structure for THIS inspection, typed or
+     * dictated. Here rather than on the object because next year's inspection
+     * of the same serial gets comments of its own.
+     */
     notes: text('notes'),
+    /**
+     * Set by "Finish Structure"; null while the inspector is still working on
+     * it. Editing a finished structure later leaves it finished.
+     */
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
     ...timestamps,
   },
   (t) => [
@@ -398,6 +415,22 @@ export const photos = pgTable(
      */
     includeInReport: boolean('include_in_report').notNull().default(true),
 
+    /**
+     * A finding: the photo shows something that does not conform to the
+     * drawings or the spec. A finding can never be left out of the report -
+     * quietly dropping the evidence of a non-conformance is exactly what a
+     * report must not allow - so the database itself refuses that combination
+     * (`photos_non_conforming_in_report` below), whatever the route does.
+     */
+    nonConforming: boolean('non_conforming').notNull().default(false),
+
+    /**
+     * The structure's ID plate: the first photo taken of every structure, its
+     * thumbnail on the inspection screen, and the first photo of its section in
+     * the report. At most one ready plate per structure per job.
+     */
+    isSerialPlate: boolean('is_serial_plate').notNull().default(false),
+
     status: photoStatus('status').notNull().default('pending'),
     uploadedBy: uuid('uploaded_by').references(() => users.id, { onDelete: 'set null' }),
     /** Stable across retries, so a dropped signal cannot duplicate a photo. */
@@ -410,6 +443,12 @@ export const photos = pgTable(
     index('photos_company_taken_idx').on(t.companyOrgId, t.takenAt),
     index('photos_report_idx').on(t.jobId, t.includeInReport),
     uniqueIndex('photos_job_client_ref_unique').on(t.jobId, t.clientRef),
+    // Plain SQL rather than column references, so the migration carries these
+    // predicates exactly as written here.
+    check('photos_non_conforming_in_report', sql`NOT non_conforming OR include_in_report`),
+    uniqueIndex('photos_one_serial_plate')
+      .on(t.jobId, t.objectId)
+      .where(sql`is_serial_plate AND status = 'ready'`),
   ],
 );
 

@@ -5,7 +5,7 @@ import {
   notFound,
   type JobContext,
 } from '../authz.js';
-import { companyStaffOrgIds, type Principal } from '@inspectorone/shared';
+import { companyStaffOrgIds, uuid, type Principal } from '@inspectorone/shared';
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '../db/client.js';
 import { jobClientViewers, jobInspectors, jobs } from '../db/schema.js';
@@ -18,6 +18,10 @@ import { jobClientViewers, jobInspectors, jobs } from '../db/schema.js';
  * `notFound` in authz.ts.
  */
 export async function loadJobContext(principal: Principal, jobId: string) {
+  // A malformed id names no job; without this Postgres rejects the uuid cast
+  // and the caller sees a 500 instead of a 404.
+  if (!uuid.safeParse(jobId).success) throw notFound('Job');
+
   const { db } = await getDb();
 
   const [job] = await db.select().from(jobs).where(eq(jobs.id, jobId)).limit(1);

@@ -317,7 +317,7 @@ describe('client scoping', () => {
       method: 'POST',
       url: '/api/photos/upload-url',
       headers: auth(await login('jamie@harborpoint.example')),
-      payload: { jobId: SEED.job4, contentType: 'image/jpeg', byteSize: 1000 },
+      payload: { jobId: SEED.job4, contentType: 'image/jpeg', byteSize: 1000, width: 1600, height: 1200 },
     });
     assert.equal(res.statusCode, 403);
   });

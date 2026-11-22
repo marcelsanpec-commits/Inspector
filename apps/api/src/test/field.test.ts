@@ -42,6 +42,9 @@ async function login(email: string): Promise<string> {
 
 const auth = (token: string) => ({ authorization: `Bearer ${token}` });
 
+/** Every upload declares a 4:3 size - the report frame the API enforces. */
+const SHOT = { width: 1600, height: 1200 } as const;
+
 before(async () => {
   await seed({ quiet: true });
   app = await buildApp();
@@ -186,6 +189,7 @@ describe('photo upload handshake', () => {
       jobId: SEED.job1,
       contentType: 'image/jpeg' as const,
       byteSize: JPEG.length,
+      ...SHOT,
       clientRef: 'offline-retry-77',
     };
     const token = auth(await login('marcus@sanpec.example'));
@@ -213,6 +217,7 @@ describe('photo upload handshake', () => {
         jobId: SEED.job1,
         contentType: 'image/jpeg',
         byteSize: JPEG.length,
+        ...SHOT,
         clientRef: 'never-uploaded',
       },
     });
@@ -230,7 +235,7 @@ describe('photo upload handshake', () => {
       method: 'POST',
       url: '/api/photos/upload-url',
       headers: auth(await login('marcus@sanpec.example')),
-      payload: { jobId: SEED.job3, contentType: 'image/jpeg', byteSize: JPEG.length },
+      payload: { jobId: SEED.job3, contentType: 'image/jpeg', byteSize: JPEG.length, ...SHOT },
     });
     assert.equal(res.statusCode, 404);
   });
@@ -245,6 +250,7 @@ describe('photo upload handshake', () => {
         objectId: SEED.objDock,
         contentType: 'image/jpeg',
         byteSize: JPEG.length,
+        ...SHOT,
       },
     });
     assert.equal(res.statusCode, 404);
@@ -259,6 +265,7 @@ describe('photo upload handshake', () => {
         jobId: SEED.job1,
         contentType: 'image/jpeg',
         byteSize: JPEG.length,
+        ...SHOT,
         clientRef: 'tamper-test',
       },
     });
@@ -281,6 +288,7 @@ describe('photo upload handshake', () => {
         jobId: SEED.job1,
         contentType: 'image/jpeg',
         byteSize: 10,
+        ...SHOT,
         clientRef: 'oversize-test',
       },
     });

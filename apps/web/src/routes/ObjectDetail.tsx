@@ -43,7 +43,7 @@ export default function ObjectDetail() {
     queryFn: () => api<ObjectResponse>(`/api/objects/${objectId}`),
   });
 
-  if (data.isLoading) return <Loading label="Loading object" />;
+  if (data.isLoading) return <Loading label="Loading structure" />;
   if (data.isError) return <ErrorNotice error={data.error} />;
   if (!data.data) return null;
 
@@ -80,7 +80,7 @@ export default function ObjectDetail() {
         </div>
         {history.length === 0 ? (
           <EmptyState title="Not inspected yet">
-            This object was recorded but has not been part of a completed job.
+            This structure was recorded but has not been part of a completed job.
           </EmptyState>
         ) : (
           <div className="list" style={{ borderTop: '1px solid var(--border)' }}>

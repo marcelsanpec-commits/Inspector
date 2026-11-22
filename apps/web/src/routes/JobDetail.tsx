@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { CameraIcon } from '../components/icons.js';
 import {
   Chevron,
   EmptyState,
@@ -9,6 +10,7 @@ import {
   StatusBadge,
 } from '../components/ui.js';
 import { api } from '../lib/api.js';
+import { plural } from '../lib/inspection.js';
 
 interface JobDetailResponse {
   job: {
@@ -27,10 +29,12 @@ interface JobDetailResponse {
   client: { id: string; name: string };
   inspectors: { userId: string; name: string; email: string }[];
   objects: {
+    structureId: string;
     objectId: string;
     serialNumber: string;
     label: string | null;
     objectType: string | null;
+    finishedAt: string | null;
     photoCount: number;
   }[];
   photoCount: number;
@@ -44,6 +48,7 @@ interface JobDetailResponse {
 export default function JobDetail() {
   const { id } = useParams<{ id: string }>();
   const qc = useQueryClient();
+  const navigate = useNavigate();
 
   const job = useQuery({
     queryKey: ['job', id],
@@ -56,6 +61,15 @@ export default function JobDetail() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['job', id] });
       qc.invalidateQueries({ queryKey: ['jobs'] });
+    },
+  });
+
+  const startInspection = useMutation({
+    mutationFn: () => api(`/api/jobs/${id}/start`, { method: 'POST' }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['job', id] });
+      qc.invalidateQueries({ queryKey: ['jobs'] });
+      navigate(`/jobs/${id}/inspect`);
     },
   });
 
@@ -90,48 +104,50 @@ export default function JobDetail() {
         </div>
       </div>
 
-      <ErrorNotice error={transition.error} />
+      <ErrorNotice error={transition.error ?? startInspection.error} />
 
-      {permissions.canWriteContent && (
-        <div className="card card-pad mb">
-          <div className="between">
-            <div>
-              <h3>Field work</h3>
-              <div className="small muted" style={{ marginTop: 3 }}>
-                Capture photos, organised by object.
-              </div>
-            </div>
-            <Link className="btn btn-primary btn-lg" to={`/jobs/${j.id}/capture`}>
-              Open camera
-            </Link>
-          </div>
-        </div>
+      {(permissions.canWriteContent || objects.length > 0) && (
+        <InspectionCard
+          jobId={j.id}
+          status={j.status}
+          canWrite={permissions.canWriteContent}
+          structureCount={objects.length}
+          starting={startInspection.isPending}
+          onStart={() => startInspection.mutate()}
+        />
       )}
 
       <div className="grid grid-2">
         <div className="card">
           <div className="card-pad between">
-            <h2>Objects</h2>
+            <h2>Structures</h2>
             <span className="pill">{objects.length}</span>
           </div>
           {objects.length === 0 ? (
-            <EmptyState title="No objects recorded yet">
-              An object is a serial-numbered item at this site. The inspector adds
-              them while working.
+            <EmptyState title="No structures recorded yet">
+              A structure is a serial-numbered item at this site. The inspector adds
+              each one during the inspection, starting with its serial plate.
             </EmptyState>
           ) : (
             <div className="list" style={{ borderTop: '1px solid var(--border)' }}>
               {objects.map((o) => (
-                <Link className="row" key={o.objectId} to={`/objects/${o.objectId}`}>
+                <Link
+                  className="row"
+                  key={o.structureId}
+                  to={`/jobs/${j.id}/inspect/${o.structureId}`}
+                >
                   <div className="row-main">
-                    <div className="row-title mono">{o.serialNumber}</div>
+                    <div className="row-title">{o.objectType ?? o.serialNumber}</div>
                     <div className="row-meta">
-                      {o.label ?? 'No label'}
-                      {o.objectType ? ` · ${o.objectType}` : ''}
+                      <span className="mono">{o.serialNumber}</span>
+                      {o.label ? ` · ${o.label}` : ''}
                     </div>
                   </div>
                   <div className="row-side">
-                    <span className="pill">{o.photoCount} photos</span>
+                    {!o.finishedAt && (
+                      <span className="badge badge-in_progress hide-sm">in progress</span>
+                    )}
+                    <span className="pill">{plural(o.photoCount, 'photo')}</span>
                     <Chevron />
                   </div>
                 </Link>
@@ -208,13 +224,14 @@ export default function JobDetail() {
             <div className="card card-pad">
               <h2 className="mb">Move this job along</h2>
               <div className="btn-row">
-                {permissions.canWriteContent && j.status !== 'in_progress' && (
+                {/* Draft and scheduled jobs start from the Inspection card. */}
+                {permissions.canWriteContent && j.status === 'submitted' && (
                   <button
                     className="btn"
                     disabled={transition.isPending}
                     onClick={() => transition.mutate('start')}
                   >
-                    Mark in progress
+                    Reopen for field work
                   </button>
                 )}
                 {permissions.canSubmit &&
@@ -246,5 +263,66 @@ export default function JobDetail() {
         </div>
       </div>
     </>
+  );
+}
+
+/**
+ * Where field work begins. "Start Inspection" marks the job in progress and
+ * opens it; after that the same card continues it, and once the job is
+ * submitted it opens the record read-only.
+ */
+function InspectionCard({
+  jobId,
+  status,
+  canWrite,
+  structureCount,
+  starting,
+  onStart,
+}: {
+  jobId: string;
+  status: string;
+  canWrite: boolean;
+  structureCount: number;
+  starting: boolean;
+  onStart(): void;
+}) {
+  const startable = canWrite && (status === 'draft' || status === 'scheduled');
+  const underway = canWrite && !startable;
+
+  return (
+    <div className="card card-pad mb">
+      <div className="between" style={{ flexWrap: 'wrap' }}>
+        <div>
+          <h3>Inspection</h3>
+          <div className="small muted" style={{ marginTop: 3 }}>
+            {startable
+              ? "Photograph each structure's serial plate, then everything about it."
+              : structureCount > 0
+                ? `${plural(structureCount, 'structure')} recorded.`
+                : 'No structures recorded yet.'}
+          </div>
+        </div>
+        {startable ? (
+          <button className="btn btn-primary btn-lg" onClick={onStart} disabled={starting}>
+            {starting ? <span className="spin" /> : <CameraIcon size={20} />}
+            Start Inspection
+          </button>
+        ) : underway && status === 'in_progress' ? (
+          <Link className="btn btn-primary btn-lg" to={`/jobs/${jobId}/inspect`}>
+            <CameraIcon size={20} />
+            Continue Inspection
+          </Link>
+        ) : underway ? (
+          // Company staff reviewing a submitted job can still correct it.
+          <Link className="btn btn-lg" to={`/jobs/${jobId}/inspect`}>
+            Open inspection
+          </Link>
+        ) : (
+          <Link className="btn btn-lg" to={`/jobs/${jobId}/inspect`}>
+            View inspection
+          </Link>
+        )}
+      </div>
+    </div>
   );
 }

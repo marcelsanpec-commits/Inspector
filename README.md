@@ -19,7 +19,7 @@ To try the camera and dictation properly you need a real phone: `npm run dev`
 binds to your network, so open `http://<your-computer's-IP>:5173` on the handset
 while it's on the same wifi. A desktop browser cannot honestly test either one.
 
-`npm test` runs 57 tests. `npm run db:reset` wipes local data; follow with `npm run seed`.
+`npm test` runs 98 tests. `npm run db:reset` wipes local data; follow with `npm run seed`.
 
 Every seeded account uses the password **`inspector-demo-2026`**:
 
@@ -79,11 +79,38 @@ Two paths, both supported:
 Inviting a brand-new *client company* creates that org, makes the invitee its
 owner, and links it to your company in one step.
 
+### Inspections and structures
+
+An inspector opens a job and taps **Start Inspection** (the job moves to
+`in_progress`). The inspection is organised by **structure** — one pole
+section, one anchor bolt cage:
+
+1. **New Structure** asks for a photo of the serial number plate first, then
+   the serial and what the structure is ("Pole section").
+2. Every photo taken on the structure's screen files under it. Each one can be
+   marked **non-conforming** (a finding) and **include in report**.
+3. **Comments** for the structure are typed or dictated and save themselves.
+4. **Finish Structure** puts it on the inspection screen as a tile: plate photo
+   as the picture, structure type as the title. It stays editable — serial,
+   type, comments, photos — until the job is submitted.
+
+A structure is an *object* (serial, type — persistent, with history across
+jobs) seen through one *job* (comments, finished or not). A serial the site
+already knows links to its existing record.
+
+**Non-conforming photos are always in the report.** The app locks the toggle,
+the API refuses the combination, and a database check constraint backs both.
+
+**Every photo is 4:3** — landscape, or 3:4 if the phone was upright — the frame
+the company's reports already use. The app crops before upload (with a slider
+when a 16:9 camera leaves something to trim) and the API rejects anything else.
+`PHOTO_ASPECT_LONG`/`SHORT` in `packages/shared/src/photos.ts` set it.
+
 ### Photos
 
 Uploads are a three-step handshake:
 
-1. Client resizes/compresses, reads EXIF, asks `POST /api/photos/upload-url`
+1. Client crops/resizes/compresses, reads EXIF, asks `POST /api/photos/upload-url`
 2. Client `PUT`s bytes **directly** to the signed URL
 3. `POST /api/photos/confirm` — the API verifies the object exists before the
    photo leaves `pending`
@@ -102,7 +129,42 @@ service.
 **`includeInReport`** is a per-photo toggle, editable long after capture — the
 call is usually clearer at the office than on a ladder. The **gallery**
 (`GET /api/gallery`) is deliberately separate from the report and filters by
-job, jobsite, object, client, capture date, and report inclusion.
+job, jobsite, structure, client, capture date, report inclusion, and findings.
+
+### Photo storage (R2)
+
+The code is ready for Cloudflare R2; switching is configuration only. Until
+then production keeps photos on the Render instance, which loses them on every
+deploy.
+
+1. **Cloudflare dashboard → R2 → Create bucket**, named `inspectorone-media`.
+2. **The bucket → Settings → CORS policy → Edit**, and paste:
+
+   ```json
+   [
+     {
+       "AllowedOrigins": ["https://inspectorone-web.onrender.com", "http://localhost:5173"],
+       "AllowedMethods": ["GET", "PUT", "HEAD"],
+       "AllowedHeaders": ["content-type"],
+       "ExposeHeaders": ["ETag"],
+       "MaxAgeSeconds": 3600
+     }
+   ]
+   ```
+
+   Phones upload straight to the bucket, so without this every upload fails
+   with a vague network error.
+3. **R2 → Manage API tokens → Create API token**: *Object Read & Write*,
+   limited to that bucket. Note the Access Key ID, the Secret Access Key, and
+   your Account ID.
+4. **Render → `inspector-qp70` → Environment**: set `STORAGE_DRIVER=s3`,
+   `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`,
+   `R2_BUCKET=inspectorone-media`. Saving redeploys.
+5. **Check it from your computer**: put the same five values in `.env.local`
+   and run
+   `CORS_ORIGINS=https://inspectorone-web.onrender.com npm run storage:check`.
+   It uploads, reads back, and deletes one tiny test photo the way a phone
+   would, and says which step failed if one does.
 
 ## Local vs production
 
@@ -129,8 +191,8 @@ Push to `main` afterwards and it redeploys automatically.
 
 Before the first deploy: a Postgres (Neon/Supabase — **not** Render's free tier,
 which is deleted after 30 days), an R2 bucket with **CORS configured in the
-Cloudflare dashboard** (the local driver won't surface that requirement), and
-`SIGNING_SECRET` from `openssl rand -hex 32`.
+Cloudflare dashboard** (see *Photo storage* above — the local driver won't
+surface that requirement), and `SIGNING_SECRET` from `openssl rand -hex 32`.
 
 Compress images client-side. Phone photos are ~4MB; at 1600px JPEG q80 they're
 ~350KB. Across five inspectors that's 24GB/month versus 2GB/month.
@@ -140,13 +202,17 @@ Compress images client-side. Phone photos are ~4MB; at 1600px JPEG q80 they're
 **Done — back end:** schema (14 tables), signup/login/sessions, invites both
 ways, roster management for companies and clients, sites, persistent objects,
 jobs with multi-inspector assignment and restrictable client access, photo
-upload handshake, voice notes, report-inclusion toggle, gallery with filters.
-57 tests.
+upload handshake, voice notes, report-inclusion toggle, gallery with filters,
+structures (create, edit, finish, remove, correct a serial), serial plate
+photos, non-conforming findings, the 4:3 photo frame, R2-ready storage with
+`npm run storage:check`. 98 tests.
 
 **Done — app:** one React app with role-aware navigation. Login and a
-three-way signup; inspector capture (camera, New Object by serial, on-device
-dictation, include-in-report); company job creation, team roster, clients,
-sites; client-facing job list and gallery; per-object inspection history.
+three-way signup; the inspection flow (Start Inspection, New Structure from
+the serial plate, camera with 4:3 framing, non-conforming and include-in-report
+per photo, dictated comments, Finish Structure, structure tiles); company job
+creation, team roster, clients, sites; client-facing job list and gallery;
+per-structure inspection history.
 
-**Next:** the report template and PDF generation, then the offline capture
-queue, then Cloudflare R2 so photos survive a redeploy.
+**Next:** Cloudflare R2 (code ready — needs the bucket and keys above), then
+the report template and PDF generation, then the offline capture queue.

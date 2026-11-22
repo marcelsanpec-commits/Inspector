@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isReportAspect, PHOTO_ASPECT_LONG, PHOTO_ASPECT_SHORT } from './photos.js';
 import {
   CLIENT_ACCESS_MODES,
   JOB_STATUSES,
@@ -187,49 +188,118 @@ export const listJobsQuerySchema = z.object({
   offset: z.coerce.number().int().min(0).default(0),
 });
 
-// --- Photos -----------------------------------------------------------------
+// --- Inspections: structures ------------------------------------------------
 
 /**
- * Step 1 of the upload handshake. The client has already resized, compressed,
- * and read EXIF off the image; it sends metadata only and gets back a URL it
- * PUTs the bytes to directly. The API never touches image data.
+ * "New Structure" during an inspection: the serial off the ID plate and what
+ * the structure is ("Anchor bolt cage", "Pole section"). A structure is a
+ * persistent object seen through one job, so a serial this site already knows
+ * links to that object and its history rather than creating a second one.
+ *
+ * `.trim()` comes before `.min(1)` on purpose - the other way round, a serial
+ * of three spaces passes the length check and is then trimmed to nothing.
  */
-export const requestPhotoUploadSchema = z.object({
-  jobId: uuid,
-  objectId: uuid.nullable().optional(),
-  contentType: z.enum(['image/jpeg', 'image/png', 'image/webp']),
-  /** Byte length of the COMPRESSED file about to be sent. */
-  byteSize: z
-    .number()
-    .int()
-    .positive()
-    .max(15 * 1024 * 1024, 'Compress before uploading - 15MB hard ceiling'),
-  width: z.number().int().positive().optional(),
-  height: z.number().int().positive().optional(),
-  /** Original capture time from EXIF, not upload time. */
-  takenAt: z.coerce.date().nullable().optional(),
-  gpsLat: z.number().min(-90).max(90).nullable().optional(),
-  gpsLng: z.number().min(-180).max(180).nullable().optional(),
-  caption: z.string().max(1000).optional(),
-  voiceNote: z.string().max(10000).optional(),
-  voiceNoteIsDictated: z.boolean().default(false),
-  includeInReport: z.boolean().default(true),
-  /**
-   * Client-generated and stable across retries. Lets an inspector who loses
-   * signal mid-upload retry without creating a duplicate photo.
-   */
-  clientRef: z.string().min(1).max(100).optional(),
+export const createStructureSchema = z.object({
+  serialNumber: z.string().trim().min(1, 'Enter the serial number').max(120),
+  structureType: z.string().trim().min(1, 'Enter what the structure is').max(120),
+  comments: z.string().max(10000).optional(),
 });
+export type CreateStructureInput = z.infer<typeof createStructureSchema>;
+
+/** Everything the inspector can change about a structure after creating it. */
+export const updateStructureSchema = z.object({
+  serialNumber: z.string().trim().min(1, 'Enter the serial number').max(120).optional(),
+  structureType: z
+    .string()
+    .trim()
+    .min(1, 'Enter what the structure is')
+    .max(120)
+    .optional(),
+  comments: z.string().max(10000).nullable().optional(),
+  /** "Finish Structure" sets this; false reopens it. */
+  finished: z.boolean().optional(),
+});
+export type UpdateStructureInput = z.infer<typeof updateStructureSchema>;
+
+// --- Photos -----------------------------------------------------------------
+
+export const NON_CONFORMING_IN_REPORT =
+  'A non-conforming photo is always included in the report';
+
+/**
+ * Step 1 of the upload handshake. The client has already cropped, resized,
+ * compressed, and read EXIF off the image; it sends metadata only and gets
+ * back a URL it PUTs the bytes to directly. The API never touches image data.
+ */
+export const requestPhotoUploadSchema = z
+  .object({
+    jobId: uuid,
+    objectId: uuid.nullable().optional(),
+    contentType: z.enum(['image/jpeg', 'image/png', 'image/webp']),
+    /** Byte length of the COMPRESSED file about to be sent. */
+    byteSize: z
+      .number()
+      .int()
+      .positive()
+      .max(15 * 1024 * 1024, 'Compress before uploading - 15MB hard ceiling'),
+    /**
+     * Required, because they are how the report frame is enforced: the API
+     * never sees the bytes, so the declared size is the only thing it can hold
+     * a client to.
+     */
+    width: z.number().int().positive(),
+    height: z.number().int().positive(),
+    /** Original capture time from EXIF, not upload time. */
+    takenAt: z.coerce.date().nullable().optional(),
+    gpsLat: z.number().min(-90).max(90).nullable().optional(),
+    gpsLng: z.number().min(-180).max(180).nullable().optional(),
+    caption: z.string().max(1000).optional(),
+    voiceNote: z.string().max(10000).optional(),
+    voiceNoteIsDictated: z.boolean().default(false),
+    includeInReport: z.boolean().default(true),
+    /** A finding. Forces includeInReport - see the refinement below. */
+    nonConforming: z.boolean().default(false),
+    /**
+     * The structure's ID plate. Confirming a new one replaces the previous
+     * plate photo for that structure on this job - it is a retake.
+     */
+    serialPlate: z.boolean().default(false),
+    /**
+     * Client-generated and stable across retries. Lets an inspector who loses
+     * signal mid-upload retry without creating a duplicate photo.
+     */
+    clientRef: z.string().min(1).max(100).optional(),
+  })
+  .refine((v) => isReportAspect(v.width, v.height), {
+    message: `Photos must be cropped to ${PHOTO_ASPECT_LONG}:${PHOTO_ASPECT_SHORT} (either orientation) before upload`,
+    path: ['width'],
+  })
+  .refine((v) => !v.nonConforming || v.includeInReport, {
+    message: NON_CONFORMING_IN_REPORT,
+    path: ['includeInReport'],
+  })
+  .refine((v) => !v.serialPlate || !!v.objectId, {
+    message: 'A serial plate photo must belong to a structure',
+    path: ['objectId'],
+  });
 export type RequestPhotoUploadInput = z.infer<typeof requestPhotoUploadSchema>;
 
 export const confirmPhotoUploadSchema = z.object({ photoId: uuid });
 
-/** Everything about a photo an inspector can change after the fact. */
+/**
+ * Everything about a photo an inspector can change after the fact. Whether a
+ * non-conforming photo may leave the report depends on its stored state as
+ * well as this body, so that rule is enforced by the route (and, finally, by a
+ * database constraint) rather than here.
+ */
 export const updatePhotoSchema = z.object({
   caption: z.string().max(1000).nullable().optional(),
   voiceNote: z.string().max(10000).nullable().optional(),
   voiceNoteIsDictated: z.boolean().optional(),
   includeInReport: z.boolean().optional(),
+  nonConforming: z.boolean().optional(),
+  /** true makes this the structure's plate photo, demoting any other. */
+  serialPlate: z.boolean().optional(),
   objectId: uuid.nullable().optional(),
 });
 
@@ -243,6 +313,7 @@ export const galleryQuerySchema = z.object({
   takenFrom: z.coerce.date().optional(),
   takenTo: z.coerce.date().optional(),
   includeInReport: booleanParam.optional(),
+  nonConforming: booleanParam.optional(),
   limit: z.coerce.number().int().min(1).max(200).default(100),
   offset: z.coerce.number().int().min(0).default(0),
 });

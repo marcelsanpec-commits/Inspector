@@ -126,15 +126,17 @@ export async function jobRoutes(app: FastifyInstance) {
       .innerJoin(users, eq(jobInspectors.userId, users.id))
       .where(eq(jobInspectors.jobId, job.id));
 
-    // Objects worked on this job, each with how many photos it carries.
+    // Structures worked on this job, each with how many photos it carries.
     const jobObjectRows = await db
       .select({
+        structureId: jobObjects.id,
         objectId: objects.id,
         serialNumber: objects.serialNumber,
         label: objects.label,
         objectType: objects.objectType,
         position: jobObjects.position,
         notes: jobObjects.notes,
+        finishedAt: jobObjects.finishedAt,
         photoCount: count(photos.id),
       })
       .from(jobObjects)
@@ -148,8 +150,8 @@ export async function jobRoutes(app: FastifyInstance) {
         ),
       )
       .where(eq(jobObjects.jobId, job.id))
-      .groupBy(objects.id, jobObjects.position, jobObjects.notes)
-      .orderBy(jobObjects.position);
+      .groupBy(jobObjects.id, objects.id)
+      .orderBy(jobObjects.position, jobObjects.createdAt);
 
     const [photoTotal] = await db
       .select({ n: count() })
@@ -320,14 +322,24 @@ export async function jobRoutes(app: FastifyInstance) {
 
   // --- Workflow transitions -------------------------------------------------
 
+  /**
+   * "Start Inspection". Safe to press twice: an inspection already under way
+   * is returned untouched, and `startedAt` keeps the first start rather than
+   * moving to whenever somebody last opened the screen.
+   */
   app.post<{ Params: { id: string } }>('/api/jobs/:id/start', async (req) => {
     const p = requirePrincipal(req);
     const { job, ctx, db } = await loadJobContext(p, req.params.id);
     if (!canWriteJobContent(p, ctx)) throw forbidden('Cannot start this job');
+    if (job.status === 'in_progress') return { job };
 
     const [updated] = await db
       .update(jobs)
-      .set({ status: 'in_progress', startedAt: new Date(), updatedAt: new Date() })
+      .set({
+        status: 'in_progress',
+        startedAt: job.startedAt ?? new Date(),
+        updatedAt: new Date(),
+      })
       .where(eq(jobs.id, job.id))
       .returning();
     return { job: updated };

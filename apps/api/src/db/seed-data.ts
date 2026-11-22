@@ -193,11 +193,36 @@ export async function seed({ quiet = false, force = false } = {}) {
   // Only Jamie may see the restricted job - Alex, in the same client org, may not.
   await db.insert(jobClientViewers).values([{ jobId: SEED.job5, userId: SEED.jamie }]);
 
+  // Job 1 has one finished structure and one still being worked, so the
+  // inspection screen shows both states on a fresh seed.
   await db.insert(jobObjects).values([
-    { jobId: SEED.job1, objectId: SEED.objElevator, position: 0 },
-    { jobId: SEED.job1, objectId: SEED.objAhu, position: 1 },
-    { jobId: SEED.job3, objectId: SEED.objDock, position: 0 },
-    { jobId: SEED.job4, objectId: SEED.objAhu, position: 0 },
+    {
+      jobId: SEED.job1,
+      objectId: SEED.objElevator,
+      position: 0,
+      finishedAt: days(0),
+      createdBy: SEED.marcus,
+      notes:
+        'Machine room clean and dry. Light surface corrosion on the governor rope - monitor at the next annual. Pit ladder is not secured to the wall and must be anchored before the next service visit.',
+    },
+    { jobId: SEED.job1, objectId: SEED.objAhu, position: 1, createdBy: SEED.marcus },
+    {
+      jobId: SEED.job3,
+      objectId: SEED.objDock,
+      position: 0,
+      finishedAt: days(-4),
+      createdBy: SEED.priya,
+      notes: 'Hinge pin walking out approximately 8mm. Recommend replacement.',
+    },
+    {
+      jobId: SEED.job4,
+      objectId: SEED.objAhu,
+      position: 0,
+      finishedAt: days(-20),
+      createdBy: SEED.priya,
+      notes:
+        'Storm tore the access panel free and saturated the insulation. Housing must be repaired before the unit returns to service.',
+    },
   ]);
 
   /**
@@ -217,11 +242,21 @@ export async function seed({ quiet = false, force = false } = {}) {
     );
   }
 
-  const photoSpecs = skipPhotos ? [] : [
+  const photoSpecs: {
+    jobId: string;
+    objectId: string;
+    caption: string;
+    voiceNote: string | null;
+    include: boolean;
+    nonConforming?: boolean;
+    plate?: boolean;
+  }[] = skipPhotos ? [] : [
+    { jobId: SEED.job1, objectId: SEED.objElevator, caption: 'ID plate', voiceNote: null, include: true, plate: true },
     { jobId: SEED.job1, objectId: SEED.objElevator, caption: 'Machine room overview', voiceNote: 'Governor rope shows light surface corrosion, no measurable loss of section.', include: true },
     { jobId: SEED.job1, objectId: SEED.objElevator, caption: 'Governor rope close-up', voiceNote: null, include: false },
+    { jobId: SEED.job1, objectId: SEED.objElevator, caption: 'Pit ladder not secured to wall', voiceNote: null, include: true, nonConforming: true },
     { jobId: SEED.job1, objectId: SEED.objAhu, caption: 'AHU-3 condensate pan', voiceNote: 'Standing water in the pan, drain appears partially blocked.', include: true },
-    { jobId: SEED.job4, objectId: SEED.objAhu, caption: 'Storm damage to housing', voiceNote: 'Access panel torn free, insulation saturated.', include: true },
+    { jobId: SEED.job4, objectId: SEED.objAhu, caption: 'Storm damage to housing', voiceNote: 'Access panel torn free, insulation saturated.', include: true, nonConforming: true },
     { jobId: SEED.job4, objectId: SEED.objAhu, caption: 'Context shot from roof access', voiceNote: null, include: false },
     { jobId: SEED.job3, objectId: SEED.objDock, caption: 'Dock leveler hinge wear', voiceNote: 'Hinge pin walking out approximately 8mm.', include: true },
   ];
@@ -253,6 +288,8 @@ export async function seed({ quiet = false, force = false } = {}) {
       voiceNote: spec.voiceNote,
       voiceNoteIsDictated: !!spec.voiceNote,
       includeInReport: spec.include,
+      nonConforming: spec.nonConforming ?? false,
+      isSerialPlate: spec.plate ?? false,
       status: 'ready',
       uploadedBy: SEED.marcus,
     });

@@ -2,15 +2,17 @@ import { randomUUID } from 'node:crypto';
 import {
   confirmPhotoUploadSchema,
   galleryQuerySchema,
+  NON_CONFORMING_IN_REPORT,
   requestPhotoUploadSchema,
   updatePhotoSchema,
 } from '@inspectorone/shared';
-import { and, asc, desc, eq, gte, inArray, lte } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, lte, ne } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { requirePrincipal } from '../auth/index.js';
 import {
   badRequest,
   canWriteJobContent,
+  conflict,
   forbidden,
   HttpError,
   jobScope,
@@ -20,6 +22,19 @@ import { getDb } from '../db/client.js';
 import { jobObjects, jobs, objects, organizations, photos, sites } from '../db/schema.js';
 import { loadJobContext } from '../lib/job-context.js';
 import { getStorage, photoKey } from '../storage/index.js';
+
+/** The Postgres error code, whether the driver throws it bare or wrapped. */
+function pgErrorCode(err: unknown): string | undefined {
+  if (!err || typeof err !== 'object') return undefined;
+  return (
+    (err as { code?: string }).code ?? (err as { cause?: { code?: string } }).cause?.code
+  );
+}
+
+/** Postgres unique_violation - here, two plate photos confirmed at once. */
+function isUniqueViolation(err: unknown): boolean {
+  return pgErrorCode(err) === '23505';
+}
 
 export async function photoRoutes(app: FastifyInstance) {
   /**
@@ -107,6 +122,8 @@ export async function photoRoutes(app: FastifyInstance) {
       voiceNote: body.voiceNote ?? null,
       voiceNoteIsDictated: body.voiceNoteIsDictated,
       includeInReport: body.includeInReport,
+      nonConforming: body.nonConforming,
+      isSerialPlate: body.serialPlate,
       status: 'pending',
       uploadedBy: p.userId,
       clientRef: body.clientRef ?? null,
@@ -147,13 +164,55 @@ export async function photoRoutes(app: FastifyInstance) {
       );
     }
 
-    const [updated] = await db
-      .update(photos)
-      .set({ status: 'ready', byteSize: stat.size, updatedAt: new Date() })
-      .where(eq(photos.id, photo.id))
-      .returning();
+    /**
+     * A new serial plate photo is a retake, so it replaces the structure's
+     * previous one outright rather than leaving a blurry first attempt behind
+     * as an ordinary photo that would then land in the report. Replacement
+     * happens here, at the moment the new bytes are proven to exist - never
+     * earlier, so a failed retake cannot cost the structure its plate.
+     */
+    let result;
+    try {
+      result = await db.transaction(async (tx) => {
+        const replaced =
+          photo.isSerialPlate && photo.objectId
+            ? await tx
+                .delete(photos)
+                .where(
+                  and(
+                    eq(photos.jobId, photo.jobId),
+                    eq(photos.objectId, photo.objectId),
+                    eq(photos.isSerialPlate, true),
+                    ne(photos.id, photo.id),
+                  ),
+                )
+                .returning({ storageKey: photos.storageKey })
+            : [];
 
-    return { photo: updated };
+        const [updated] = await tx
+          .update(photos)
+          .set({ status: 'ready', byteSize: stat.size, updatedAt: new Date() })
+          .where(eq(photos.id, photo.id))
+          .returning();
+
+        return { updated, replaced };
+      });
+    } catch (err) {
+      if (isUniqueViolation(err)) {
+        throw conflict('Another serial plate photo was saved at the same moment. Try again.');
+      }
+      throw err;
+    }
+
+    // Bytes go only after the rows are gone, so a failure here strands a file
+    // nobody references rather than a row pointing at nothing.
+    for (const { storageKey } of result.replaced) {
+      await storage.deleteObject(storageKey).catch((err: unknown) => {
+        req.log.warn({ err, storageKey }, 'Could not delete replaced plate photo');
+      });
+    }
+
+    return { photo: result.updated };
   });
 
   /**
@@ -191,22 +250,76 @@ export async function photoRoutes(app: FastifyInstance) {
         .onConflictDoNothing();
     }
 
-    const [updated] = await db
-      .update(photos)
-      .set({
-        ...(body.caption !== undefined ? { caption: body.caption } : {}),
-        ...(body.voiceNote !== undefined ? { voiceNote: body.voiceNote } : {}),
-        ...(body.voiceNoteIsDictated !== undefined
-          ? { voiceNoteIsDictated: body.voiceNoteIsDictated }
-          : {}),
-        ...(body.includeInReport !== undefined
-          ? { includeInReport: body.includeInReport }
-          : {}),
-        ...(body.objectId !== undefined ? { objectId: body.objectId } : {}),
-        updatedAt: new Date(),
-      })
-      .where(eq(photos.id, photo.id))
-      .returning();
+    // Flagging a finding pulls the photo into the report; trying to take a
+    // finding out of the report is refused rather than silently ignored, so
+    // the inspector learns why the toggle did not move.
+    const nonConforming = body.nonConforming ?? photo.nonConforming;
+    const includeInReport =
+      body.includeInReport ?? (body.nonConforming === true ? true : photo.includeInReport);
+    if (nonConforming && !includeInReport) {
+      throw badRequest(`${NON_CONFORMING_IN_REPORT}. Clear the non-conforming flag first.`);
+    }
+
+    const objectId = body.objectId !== undefined ? body.objectId : photo.objectId;
+    const moved = objectId !== photo.objectId;
+    // A plate photo moved to another structure is not that structure's plate.
+    const isSerialPlate = body.serialPlate ?? (moved ? false : photo.isSerialPlate);
+    if (isSerialPlate && !objectId) {
+      throw badRequest('A serial plate photo must belong to a structure');
+    }
+    const becomesPlate = isSerialPlate && (!photo.isSerialPlate || moved);
+
+    let updated;
+    try {
+      updated = await db.transaction(async (tx) => {
+        // Unlike a retake, choosing an existing photo as the plate keeps the
+        // old plate - it simply becomes an ordinary photo of the structure.
+        if (becomesPlate && objectId) {
+          await tx
+            .update(photos)
+            .set({ isSerialPlate: false, updatedAt: new Date() })
+            .where(
+              and(
+                eq(photos.jobId, photo.jobId),
+                eq(photos.objectId, objectId),
+                eq(photos.isSerialPlate, true),
+                ne(photos.id, photo.id),
+              ),
+            );
+        }
+
+        // Only what this request changes is written. Writing back every flag
+        // from the row read above would let a caption save that overlaps a
+        // tap on "Non-conforming" quietly undo the flag.
+        const [row] = await tx
+          .update(photos)
+          .set({
+            ...(body.caption !== undefined ? { caption: body.caption } : {}),
+            ...(body.voiceNote !== undefined ? { voiceNote: body.voiceNote } : {}),
+            ...(body.voiceNoteIsDictated !== undefined
+              ? { voiceNoteIsDictated: body.voiceNoteIsDictated }
+              : {}),
+            ...(includeInReport !== photo.includeInReport ? { includeInReport } : {}),
+            ...(body.nonConforming !== undefined ? { nonConforming } : {}),
+            ...(isSerialPlate !== photo.isSerialPlate ? { isSerialPlate } : {}),
+            ...(body.objectId !== undefined ? { objectId } : {}),
+            updatedAt: new Date(),
+          })
+          .where(eq(photos.id, photo.id))
+          .returning();
+        return row;
+      });
+    } catch (err) {
+      if (isUniqueViolation(err)) {
+        throw conflict('Another photo was made the serial plate at the same moment. Try again.');
+      }
+      // Two overlapping edits can still combine into a finding outside the
+      // report; the check constraint stops it, and this says why.
+      if (pgErrorCode(err) === '23514') {
+        throw badRequest(`${NON_CONFORMING_IN_REPORT}. Clear the non-conforming flag first.`);
+      }
+      throw err;
+    }
 
     return { photo: updated };
   });
@@ -257,6 +370,9 @@ export async function photoRoutes(app: FastifyInstance) {
     if (q.includeInReport !== undefined) {
       filters.push(eq(photos.includeInReport, q.includeInReport));
     }
+    if (q.nonConforming !== undefined) {
+      filters.push(eq(photos.nonConforming, q.nonConforming));
+    }
 
     const rows = await db
       .select({
@@ -271,6 +387,8 @@ export async function photoRoutes(app: FastifyInstance) {
         caption: photos.caption,
         voiceNote: photos.voiceNote,
         includeInReport: photos.includeInReport,
+        nonConforming: photos.nonConforming,
+        isSerialPlate: photos.isSerialPlate,
         createdAt: photos.createdAt,
         jobId: jobs.id,
         jobNumber: jobs.jobNumber,

@@ -1,19 +1,27 @@
-import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import Shell from './components/Shell.js';
 import { useAuth } from './lib/auth.js';
 import AcceptInvite from './routes/AcceptInvite.js';
 import Account from './routes/Account.js';
-import Capture from './routes/Capture.js';
 import Clients from './routes/Clients.js';
 import Gallery from './routes/Gallery.js';
+import Inspection from './routes/Inspection.js';
 import JobDetail from './routes/JobDetail.js';
 import JobNew from './routes/JobNew.js';
 import Jobs from './routes/Jobs.js';
 import Login from './routes/Login.js';
+import NewStructure from './routes/NewStructure.js';
 import ObjectDetail from './routes/ObjectDetail.js';
 import Signup from './routes/Signup.js';
 import Sites from './routes/Sites.js';
+import Structure from './routes/Structure.js';
 import Team from './routes/Team.js';
+
+/** The old capture screen's address, kept working for anyone who saved it. */
+function CaptureRedirect() {
+  const { id } = useParams<{ id: string }>();
+  return <Navigate to={`/jobs/${id}/inspect`} replace />;
+}
 
 function FullPageSpinner() {
   return (
@@ -78,7 +86,10 @@ export default function App() {
         <Route path="/jobs" element={<Jobs />} />
         <Route path="/jobs/new" element={<JobNew />} />
         <Route path="/jobs/:id" element={<JobDetail />} />
-        <Route path="/jobs/:id/capture" element={<Capture />} />
+        <Route path="/jobs/:id/inspect" element={<Inspection />} />
+        <Route path="/jobs/:id/inspect/new" element={<NewStructure />} />
+        <Route path="/jobs/:id/inspect/:structureId" element={<Structure />} />
+        <Route path="/jobs/:id/capture" element={<CaptureRedirect />} />
         <Route path="/objects/:objectId" element={<ObjectDetail />} />
         <Route path="/gallery" element={<Gallery />} />
         <Route path="/sites" element={<Sites />} />
